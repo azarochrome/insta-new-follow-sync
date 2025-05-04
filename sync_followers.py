@@ -42,16 +42,35 @@ def get_instagram_user_id(username):
     try:
         raw = instagram_api.get_web_profile_info(username)
         print(f"🧪 DEBUG [{username}] RocketAPI raw response:")
-        print(json.dumps(raw, indent=2)[:1500])  # limit to 1500 chars
+        print(json.dumps(raw, indent=2)[:1500])
 
-        user_id = raw.get("response", {}).get("body", {}).get("data", {}).get("user", {}).get("id")
+        # Try modern structure
+        user_id = (
+            raw.get("response", {})
+                .get("body", {})
+                .get("data", {})
+                .get("user", {})
+                .get("id")
+        )
+
+        # Fallback: try if "user" is directly in body
+        if not user_id:
+            user_id = (
+                raw.get("response", {})
+                    .get("body", {})
+                    .get("user", {})
+                    .get("id")
+            )
+
         if not user_id:
             raise ValueError("ID not found in RocketAPI response")
+
         return user_id
 
     except Exception as e:
         print(f"❌ IG user ID not found for @{username}: {e}")
         return None
+
 
 def get_followers(user_id, username):
     followers = []
