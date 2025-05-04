@@ -41,7 +41,7 @@ def extract_sheet_id(sheet_url):
 def get_instagram_user_id(username):
     try:
         user_info = instagram_api.get_web_profile_info(username)
-        return user_info.get("id")
+        return user_info["response"]["body"]["data"]["user"]["id"]
     except Exception as e:
         print(f"❌ IG user ID not found for @{username}: {e}")
         return None
