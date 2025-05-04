@@ -141,7 +141,7 @@ def main():
             print(f"⚠️ Skipping @{username}: Instagram user not found.")
             continue
 
-        followers = get_followers(user_id, username)
+        followers = get_followers(username)
         if not followers:
             print(f"⚠️ Skipping @{username}: no followers returned.")
             continue
