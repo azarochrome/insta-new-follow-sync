@@ -26,11 +26,9 @@ credentials = service_account.Credentials.from_service_account_info(
 sheets_service = build("sheets", "v4", credentials=credentials)
 
 # --- FUNCTIONS ---
-def get_active_accounts():
-    print("📦 Fetching active Airtable records...")
-    formula = "OR({Status} = '✅ OK', {Status} = 'Ad Issue?')"
-    params = {"filterByFormula": formula}
-    response = requests.get(AIRTABLE_URL, headers=headers, params=params)
+def get_all_accounts():
+    print("📦 Fetching ALL Airtable records (no status filter)...")
+    response = requests.get(AIRTABLE_URL, headers=headers)
     response.raise_for_status()
     return response.json().get("records", [])
 
@@ -45,7 +43,7 @@ def get_instagram_user_id(username):
         user_info = instagram_api.get_web_profile_info(username)
         return user_info.get("id")
     except Exception as e:
-        print(f"❌ IG user ID not found for {username}: {e}")
+        print(f"❌ IG user ID not found for @{username}: {e}")
         return None
 
 def get_followers(user_id, username):
@@ -60,7 +58,7 @@ def get_followers(user_id, username):
             if not max_id:
                 break
     except Exception as e:
-        print(f"❌ Error fetching followers for {username}: {e}")
+        print(f"❌ Error fetching followers for @{username}: {e}")
     print(f"📊 Pulled {len(followers)} followers from Instagram account: @{username}")
     return followers
 
@@ -92,8 +90,8 @@ def update_google_sheet(sheet_id, followers, username):
 
 # --- MAIN ---
 def main():
-    records = get_active_accounts()
-    print(f"\n🔍 Found {len(records)} active Instagram accounts to sync.")
+    records = get_all_accounts()
+    print(f"\n🔍 Found {len(records)} total records in Airtable.")
 
     for record in records:
         fields = record.get("fields", {})
