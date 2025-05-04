@@ -1,8 +1,6 @@
 import os
 import json
-import time
 import requests
-from rocketapi import InstagramAPI
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
@@ -10,15 +8,15 @@ from googleapiclient.discovery import build
 AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY")
 ROCKETAPI_TOKEN = os.environ.get("ROCKETAPI_TOKEN")
 GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+ROCKETAPI_URL = "https://v1.rocketapi.io/instagram/user/followers"
 
 # --- CONFIG ---
 AIRTABLE_BASE_ID = "appTxTTXPTBFwjelH"
 AIRTABLE_TABLE_NAME = "Accounts"
 AIRTABLE_URL = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
-airtable_headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
 
 # --- INIT SERVICES ---
-instagram_api = InstagramAPI(token=ROCKETAPI_TOKEN)
+headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
 
 credentials = service_account.Credentials.from_service_account_info(
     json.loads(GOOGLE_CREDENTIALS_JSON),
@@ -26,58 +24,53 @@ credentials = service_account.Credentials.from_service_account_info(
 )
 sheets_service = build("sheets", "v4", credentials=credentials)
 
-# --- HELPERS ---
+# --- FUNCTIONS ---
+def get_all_accounts():
+    print("\U0001F4E6 Fetching ALL Airtable records (no status filter)...")
+    response = requests.get(AIRTABLE_URL, headers=headers)
+    response.raise_for_status()
+    return response.json().get("records", [])
+
 def extract_sheet_id(sheet_url):
     try:
         return sheet_url.split("/d/")[1].split("/")[0]
     except (IndexError, AttributeError):
         return None
 
-def get_instagram_user_id(username):
-    try:
-        raw = instagram_api.get_web_profile_info(username)
-        print(f"🧪 DEBUG [{username}] RocketAPI raw response:")
-        print(json.dumps(raw, indent=2)[:1500])  # Optional preview
-
-        # RocketAPI returns: data → user → id
-        user_id = raw.get("data", {}).get("user", {}).get("id")
-        if not user_id:
-            raise ValueError("ID not found in RocketAPI response")
-        return user_id
-    except Exception as e:
-        print(f"❌ IG user ID not found for @{username}: {e}")
-        return None
-
 def get_followers(username):
     followers = []
-    end_cursor = ''
+    next_max_id = None
+    headers = {
+        "Authorization": f"Token {ROCKETAPI_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    print(f"\n🔄 Processing @{username} (IG)...")
+
     while True:
-        payload = {
-            "username": username,
-            "next_max_id": end_cursor if end_cursor else None
-        }
-        response = requests.post(
-            url=ROCKETAPI_URL,
-            headers={"Authorization": f"Token {ROCKETAPI_TOKEN}"},
-            json=payload
-        )
+        payload = {"username": username}
+        if next_max_id:
+            payload["next_max_id"] = next_max_id
 
         try:
-            json_data = response.json()
-            edges = json_data['data']['user']['edge_followed_by']['edges']
-            page_info = json_data['data']['user']['edge_followed_by']['page_info']
+            response = requests.post(ROCKETAPI_URL, headers=headers, json=payload)
+            if response.status_code != 200:
+                print(f"❌ Failed to fetch from RocketAPI ({response.status_code}): {response.text}")
+                break
+            data = response.json()
+            print(f"🧪 DEBUG [{username}] RocketAPI raw response:\n***\n  {json.dumps(data.get('data', {}), indent=2)}\n***")
+
+            users = data.get("data", {}).get("users", [])
+            followers.extend([user.get("username") for user in users if user.get("username")])
+
+            next_max_id = data.get("data", {}).get("next_max_id")
+            if not next_max_id:
+                break
+
         except Exception as e:
-            print(f"❌ Failed to parse RocketAPI response for @{username}: {e}")
+            print(f"❌ Error fetching followers for @{username}: {e}")
             break
 
-        # Add usernames
-        followers.extend([edge['node']['username'] for edge in edges])
-
-        # Stop if no more pages
-        if not page_info.get('has_next_page'):
-            break
-        end_cursor = page_info.get('end_cursor')
-
+    print(f"📊 Pulled {len(followers)} followers from @{username}")
     return followers
 
 def update_google_sheet(sheet_id, followers, username):
@@ -102,15 +95,10 @@ def update_google_sheet(sheet_id, followers, username):
             ).execute()
             print(f"✅ Synced {len(new_followers)} new followers from @{username} → Sheet tab: {username}")
         else:
-            print(f"✅ No new followers to sync for @{username}")
+            print(f"✅ No new followers to sync from @{username} → Sheet tab: {username}")
+
     except Exception as e:
         print(f"❌ Failed to update Google Sheet tab {username} in {sheet_id}: {e}")
-
-def get_all_accounts():
-    print("📦 Fetching ALL Airtable records (no status filter)...")
-    response = requests.get(AIRTABLE_URL, headers=airtable_headers)
-    response.raise_for_status()
-    return response.json().get("records", [])
 
 # --- MAIN ---
 def main():
@@ -132,13 +120,6 @@ def main():
         sheet_id = extract_sheet_id(sheet_url)
         if not sheet_id:
             print(f"⚠️ Skipping @{username}: invalid sheet URL.")
-            continue
-
-        print(f"\n🔄 Processing @{username} (IG)...")
-
-        user_id = get_instagram_user_id(username)
-        if not user_id:
-            print(f"⚠️ Skipping @{username}: Instagram user not found.")
             continue
 
         followers = get_followers(username)
