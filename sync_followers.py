@@ -66,7 +66,7 @@ def get_followers(user_id, username):
 
 def update_google_sheet(sheet_id, followers, username):
     try:
-        range_name = "Sheet1!A:A"
+        range_name = f"{username}!A:A"
         result = sheets_service.spreadsheets().values().get(
             spreadsheetId=sheet_id,
             range=range_name
@@ -79,16 +79,16 @@ def update_google_sheet(sheet_id, followers, username):
         if new_followers:
             sheets_service.spreadsheets().values().append(
                 spreadsheetId=sheet_id,
-                range="Sheet1!A1",
+                range=f"{username}!A1",
                 valueInputOption="RAW",
                 insertDataOption="INSERT_ROWS",
                 body={"values": new_followers}
             ).execute()
-            print(f"✅ Synced {len(new_followers)} new followers from @{username} → Google Sheet ID: {sheet_id}")
+            print(f"✅ Synced {len(new_followers)} new followers from @{username} → Sheet tab: {username}")
         else:
-            print(f"✅ No new followers to sync from @{username} → Sheet ID: {sheet_id}")
+            print(f"✅ No new followers to sync from @{username} → Sheet tab: {username}")
     except Exception as e:
-        print(f"❌ Failed to update Google Sheet {sheet_id} for {username}: {e}")
+        print(f"❌ Failed to update Google Sheet tab {username} in {sheet_id}: {e}")
 
 # --- MAIN ---
 def main():
