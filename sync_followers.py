@@ -48,31 +48,36 @@ def get_instagram_user_id(username):
         print(f"❌ IG user ID not found for @{username}: {e}")
         return None
 
-def get_followers(user_id, username):
+def get_followers(username):
     followers = []
-    max_id = None
-    retries = 3
-
+    end_cursor = ''
     while True:
+        payload = {
+            "username": username,
+            "next_max_id": end_cursor if end_cursor else None
+        }
+        response = requests.post(
+            url=ROCKETAPI_URL,
+            headers={"Authorization": f"Token {ROCKETAPI_TOKEN}"},
+            json=payload
+        )
+
         try:
-            result = instagram_api.get_user_followers(user_id, count=50, max_id=max_id)
-            users = result.get("users", [])
-            followers.extend([u.get("username") for u in users])
-            max_id = result.get("next_max_id")
-
-            if not max_id:
-                break
-
+            json_data = response.json()
+            edges = json_data['data']['user']['edge_followed_by']['edges']
+            page_info = json_data['data']['user']['edge_followed_by']['page_info']
         except Exception as e:
-            if retries > 0:
-                print(f"⚠️ Error during pagination for @{username}, retrying... ({retries} left)")
-                retries -= 1
-                time.sleep(2)
-                continue
-            print(f"❌ Final error fetching followers for @{username}: {e}")
+            print(f"❌ Failed to parse RocketAPI response for @{username}: {e}")
             break
 
-    print(f"📊 Pulled {len(followers)} followers from @{username}")
+        # Add usernames
+        followers.extend([edge['node']['username'] for edge in edges])
+
+        # Stop if no more pages
+        if not page_info.get('has_next_page'):
+            break
+        end_cursor = page_info.get('end_cursor')
+
     return followers
 
 def update_google_sheet(sheet_id, followers, username):
