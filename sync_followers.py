@@ -41,6 +41,7 @@ def extract_sheet_id(sheet_url):
 def get_instagram_user_id(username):
     try:
         user_info = instagram_api.get_web_profile_info(username)
+        print(f"🧪 DEBUG [{username}] RocketAPI raw response:\n{json.dumps(user_info, indent=2)}\n")
         return user_info["response"]["body"]["data"]["user"]["id"]
     except Exception as e:
         print(f"❌ IG user ID not found for @{username}: {e}")
