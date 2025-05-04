@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import requests
 from rocketapi import InstagramAPI
 from google.oauth2 import service_account
@@ -36,14 +37,13 @@ def get_instagram_user_id(username):
     try:
         raw = instagram_api.get_web_profile_info(username)
         print(f"🧪 DEBUG [{username}] RocketAPI raw response:")
-        print(json.dumps(raw, indent=2)[:1500])  # Optional: preview trimmed
+        print(json.dumps(raw, indent=2)[:1500])  # Optional preview
 
-        # Final RocketAPI format: data → user → id
+        # RocketAPI returns: data → user → id
         user_id = raw.get("data", {}).get("user", {}).get("id")
         if not user_id:
             raise ValueError("ID not found in RocketAPI response")
         return user_id
-
     except Exception as e:
         print(f"❌ IG user ID not found for @{username}: {e}")
         return None
@@ -51,16 +51,27 @@ def get_instagram_user_id(username):
 def get_followers(user_id, username):
     followers = []
     max_id = None
-    try:
-        while True:
+    retries = 3
+
+    while True:
+        try:
             result = instagram_api.get_user_followers(user_id, count=50, max_id=max_id)
             users = result.get("users", [])
             followers.extend([u.get("username") for u in users])
             max_id = result.get("next_max_id")
+
             if not max_id:
                 break
-    except Exception as e:
-        print(f"❌ Error fetching followers for @{username}: {e}")
+
+        except Exception as e:
+            if retries > 0:
+                print(f"⚠️ Error during pagination for @{username}, retrying... ({retries} left)")
+                retries -= 1
+                time.sleep(2)
+                continue
+            print(f"❌ Final error fetching followers for @{username}: {e}")
+            break
+
     print(f"📊 Pulled {len(followers)} followers from @{username}")
     return followers
 
