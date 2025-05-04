@@ -14,9 +14,9 @@ GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
 AIRTABLE_BASE_ID = "appTxTTXPTBFwjelH"
 AIRTABLE_TABLE_NAME = "Accounts"
 AIRTABLE_URL = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
+airtable_headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
 
 # --- INIT SERVICES ---
-headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
 instagram_api = InstagramAPI(token=ROCKETAPI_TOKEN)
 
 credentials = service_account.Credentials.from_service_account_info(
@@ -25,13 +25,7 @@ credentials = service_account.Credentials.from_service_account_info(
 )
 sheets_service = build("sheets", "v4", credentials=credentials)
 
-# --- FUNCTIONS ---
-def get_all_accounts():
-    print("📦 Fetching ALL Airtable records (no status filter)...")
-    response = requests.get(AIRTABLE_URL, headers=headers)
-    response.raise_for_status()
-    return response.json().get("records", [])
-
+# --- HELPERS ---
 def extract_sheet_id(sheet_url):
     try:
         return sheet_url.split("/d/")[1].split("/")[0]
@@ -42,35 +36,17 @@ def get_instagram_user_id(username):
     try:
         raw = instagram_api.get_web_profile_info(username)
         print(f"🧪 DEBUG [{username}] RocketAPI raw response:")
-        print(json.dumps(raw, indent=2)[:1500])
+        print(json.dumps(raw, indent=2)[:1500])  # Optional: preview trimmed
 
-        # Try modern structure
-        user_id = (
-            raw.get("response", {})
-                .get("body", {})
-                .get("data", {})
-                .get("user", {})
-                .get("id")
-        )
-
-        # Fallback: try if "user" is directly in body
-        if not user_id:
-            user_id = (
-                raw.get("response", {})
-                    .get("body", {})
-                    .get("user", {})
-                    .get("id")
-            )
-
+        # Final RocketAPI format: data → user → id
+        user_id = raw.get("data", {}).get("user", {}).get("id")
         if not user_id:
             raise ValueError("ID not found in RocketAPI response")
-
         return user_id
 
     except Exception as e:
         print(f"❌ IG user ID not found for @{username}: {e}")
         return None
-
 
 def get_followers(user_id, username):
     followers = []
@@ -113,6 +89,12 @@ def update_google_sheet(sheet_id, followers, username):
             print(f"✅ No new followers to sync for @{username}")
     except Exception as e:
         print(f"❌ Failed to update Google Sheet tab {username} in {sheet_id}: {e}")
+
+def get_all_accounts():
+    print("📦 Fetching ALL Airtable records (no status filter)...")
+    response = requests.get(AIRTABLE_URL, headers=airtable_headers)
+    response.raise_for_status()
+    return response.json().get("records", [])
 
 # --- MAIN ---
 def main():
