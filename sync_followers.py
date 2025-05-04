@@ -37,4 +37,8 @@ def get_active_accounts():
     response.raise_for_status()
     return response.json().get("records", [])
 
-def extract_sheet_id
+def extract_sheet_id(sheet_url):
+    try:
+        return sheet_url.split("/d/")[1].split("/")[0]
+    except (IndexError, AttributeError):
+        return None
