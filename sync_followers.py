@@ -40,9 +40,15 @@ def extract_sheet_id(sheet_url):
 
 def get_instagram_user_id(username):
     try:
-        user_info = instagram_api.get_web_profile_info(username)
-        print(f"🧪 DEBUG [{username}] RocketAPI raw response:\n{json.dumps(user_info, indent=2)}\n")
-        return user_info["response"]["body"]["data"]["user"]["id"]
+        raw = instagram_api.get_web_profile_info(username)
+        print(f"🧪 DEBUG [{username}] RocketAPI raw response:")
+        print(json.dumps(raw, indent=2)[:1500])  # limit to 1500 chars
+
+        user_id = raw.get("response", {}).get("body", {}).get("data", {}).get("user", {}).get("id")
+        if not user_id:
+            raise ValueError("ID not found in RocketAPI response")
+        return user_id
+
     except Exception as e:
         print(f"❌ IG user ID not found for @{username}: {e}")
         return None
@@ -60,7 +66,7 @@ def get_followers(user_id, username):
                 break
     except Exception as e:
         print(f"❌ Error fetching followers for @{username}: {e}")
-    print(f"📊 Pulled {len(followers)} followers from Instagram account: @{username}")
+    print(f"📊 Pulled {len(followers)} followers from @{username}")
     return followers
 
 def update_google_sheet(sheet_id, followers, username):
@@ -85,7 +91,7 @@ def update_google_sheet(sheet_id, followers, username):
             ).execute()
             print(f"✅ Synced {len(new_followers)} new followers from @{username} → Sheet tab: {username}")
         else:
-            print(f"✅ No new followers to sync from @{username} → Sheet tab: {username}")
+            print(f"✅ No new followers to sync for @{username}")
     except Exception as e:
         print(f"❌ Failed to update Google Sheet tab {username} in {sheet_id}: {e}")
 
