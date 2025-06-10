@@ -101,12 +101,9 @@ def sync_instagram_posts(username):
         try:
             raw = response.json()
             body = raw.get("response", {}).get("body")
-
-            # 💡 FIX: body is already a dict, not string
             if isinstance(body, str):
                 body = json.loads(body)
 
-            # 🚫 Skip unauthorized users
             if not body or body.get("status") == "fail" or "items" not in body:
                 print(f"🚫 Not authorized or no posts for @{username}: {body.get('message', 'No items')}")
                 return
@@ -138,7 +135,7 @@ def sync_instagram_posts(username):
 
             airtable_payload = {
                 "fields": {
-                    "Username": [username],
+                    "Username": username,  # ✅ Plain text field
                     "Image": [{"url": image_url}],
                     "Caption": caption,
                     "Post Date": post_date,
