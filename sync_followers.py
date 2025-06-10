@@ -14,7 +14,7 @@ STATS_TABLE = "Instagram FC"
 POSTS_TABLE = "Instagram Posts"
 
 ROCKETAPI_INFO_URL = "https://v1.rocketapi.io/instagram/user/get_info"
-ROCKETAPI_MEDIA_URL = "https://v1.rocketapi.io/instagram/user/get_user_media_by_username"
+ROCKETAPI_MEDIA_URL = "https://v1.rocketapi.io/instagram/user/get_media_by_username"
 
 AIRTABLE_HEADERS = {
     "Authorization": f"Bearer {AIRTABLE_API_KEY}",
@@ -35,16 +35,20 @@ def get_follower_count(username):
         "Authorization": f"Token {ROCKETAPI_TOKEN}",
         "Content-Type": "application/json"
     }
+
     response = requests.post(ROCKETAPI_INFO_URL, headers=headers, json={"username": username})
     response.raise_for_status()
-    data = response.json().get("data", {})
-    user = data.get("user", {})
-    follower_count = user.get("edge_followed_by", {}).get("count")
 
-    if follower_count is None:
-        print(f"⚠️ No follower count found for @{username}")
+    try:
+        data = response.json()
+        follower_count = data.get("response", {}).get("body", {}).get("data", {}).get("user", {}).get("edge_followed_by", {}).get("count")
+        if follower_count is None:
+            print(f"⚠️ follower_count not found for @{username}")
+            return 0
+        return follower_count
+    except Exception as e:
+        print(f"❌ Error parsing follower count for @{username}: {e}")
         return 0
-    return follower_count
 
 def update_airtable_account(record_id, follower_count):
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{ACCOUNTS_TABLE}/{record_id}"
@@ -75,7 +79,13 @@ def sync_instagram_posts(username):
         "Authorization": f"Token {ROCKETAPI_TOKEN}",
         "Content-Type": "application/json"
     }
-    response = requests.post(ROCKETAPI_MEDIA_URL, headers=headers, json={"username": username})
+
+    payload = {
+        "username": username,
+        "count": 12
+    }
+
+    response = requests.post(ROCKETAPI_MEDIA_URL, headers=headers, json=payload)
     if response.status_code != 200:
         print(f"❌ Failed to fetch posts for @{username}: {response.text}")
         return
