@@ -99,56 +99,45 @@ def sync_instagram_posts(username):
         response = requests.post(ROCKETAPI_MEDIA_URL, headers=headers, json=payload)
 
         try:
-            res_data = response.json()
-            print("📥 RocketAPI Response:")
-            print(json.dumps(res_data, indent=2)[:1500])  # Truncated to avoid overload
+            raw = response.json()
+            raw_body = raw.get("response", {}).get("body")
+
+            # Fix: body is a JSON string, not dict
+            if isinstance(raw_body, str):
+                body = json.loads(raw_body)
+            else:
+                print(f"⚠️ Unexpected format for @{username}, skipping.")
+                return
+
+            if body.get("status") == "fail" or "items" not in body:
+                print(f"🚫 Not authorized or no posts for @{username}: {body.get('message', 'No items')}")
+                return
+
+            posts = body.get("items", [])
         except Exception as e:
-            print(f"❌ Failed to parse JSON for @{username}: {e}")
+            print(f"❌ Failed to parse RocketAPI post data for @{username}: {e}")
             print(response.text)
             return
 
-        # Try multiple common schemas
-        posts = []
-
-        # RocketAPI V1 - Standard schema
-        if "data" in res_data and "items" in res_data["data"]:
-            posts = res_data["data"]["items"]
-
-        # RocketAPI "response.body.data.user.edge_owner_to_timeline_media.edges" schema
-        elif "response" in res_data:
-            posts = (
-                res_data.get("response", {})
-                .get("body", {})
-                .get("data", {})
-                .get("user", {})
-                .get("edge_owner_to_timeline_media", {})
-                .get("edges", [])
-            )
-            posts = [edge.get("node", {}) for edge in posts]
-
         if not posts:
-            print(f"⚠️ No posts found for @{username} in this batch.\n")
+            print(f"⚠️ No posts found for @{username} in this batch.")
             break
 
         for post in posts:
             post_id = post.get("id")
-            image_url = post.get("image_versions2", {}).get("candidates", [{}])[0].get("url", "")
+            shortcode = post.get("code") or post.get("shortcode")
+            post_link = f"https://www.instagram.com/p/{shortcode}" if shortcode else None
+
+            if not post_link or airtable_record_exists(post_link):
+                continue
+
             caption = post.get("caption", {}).get("text", "")
             timestamp = post.get("taken_at") or post.get("taken_at_timestamp")
             post_date = datetime.utcfromtimestamp(timestamp).isoformat() if timestamp else None
-            shortcode = post.get("code") or post.get("shortcode")
-            post_link = f"https://www.instagram.com/p/{shortcode}" if shortcode else None
-            like_count = post.get("like_count") or post.get("edge_liked_by", {}).get("count", 0)
-            comment_count = post.get("comment_count") or post.get("edge_media_to_comment", {}).get("count", 0)
+            image_url = post.get("image_versions2", {}).get("candidates", [{}])[0].get("url", "")
+            like_count = post.get("like_count", 0)
+            comment_count = post.get("comment_count", 0)
             view_count = post.get("view_count", 0) if "video_versions" in post else None
-
-            if not post_link:
-                print(f"⚠️ Skipping post with no link or shortcode")
-                continue
-
-            if airtable_record_exists(post_link):
-                print(f"🔁 Post already exists in Airtable: {post_link}")
-                continue
 
             airtable_payload = {
                 "fields": {
@@ -168,14 +157,14 @@ def sync_instagram_posts(username):
                 total_posts_synced += 1
                 print(f"✅ Synced: {post_link}")
             except Exception as e:
-                print(f"❌ Error uploading post to Airtable: {e}")
+                print(f"❌ Failed to upload to Airtable: {e}")
 
-        # Check for next page
-        end_cursor = res_data.get("data", {}).get("next_max_id")
+        end_cursor = body.get("next_max_id")
         if not end_cursor:
             break
 
     print(f"🎯 Total posts synced for @{username}: {total_posts_synced}\n")
+
 # --- MAIN ---
 def main():
     try:
