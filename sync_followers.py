@@ -1,135 +1,135 @@
 import os
 import json
 import requests
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
+from datetime import datetime
 
 # --- ENV VARIABLES ---
 AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY")
 ROCKETAPI_TOKEN = os.environ.get("ROCKETAPI_TOKEN")
-GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
-ROCKETAPI_URL = "https://v1.rocketapi.io/instagram/user/followers"
 
-# --- CONFIG ---
+# --- ENDPOINTS ---
 AIRTABLE_BASE_ID = "appTxTTXPTBFwjelH"
-AIRTABLE_TABLE_NAME = "Accounts"
-AIRTABLE_URL = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
+ACCOUNTS_TABLE = "Instagram Statistics"
+STATS_TABLE = "Instagram FC"
+POSTS_TABLE = "Instagram Posts"
 
-# --- INIT SERVICES ---
-headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
+ROCKETAPI_INFO_URL = "https://v1.rocketapi.io/instagram/user/get_info"
+ROCKETAPI_POSTS_URL = "https://v1.rocketapi.io/instagram/user/posts"
 
-credentials = service_account.Credentials.from_service_account_info(
-    json.loads(GOOGLE_CREDENTIALS_JSON),
-    scopes=["https://www.googleapis.com/auth/spreadsheets"]
-)
-sheets_service = build("sheets", "v4", credentials=credentials)
+AIRTABLE_HEADERS = {
+    "Authorization": f"Bearer {AIRTABLE_API_KEY}",
+    "Content-Type": "application/json"
+}
 
 # --- FUNCTIONS ---
 def get_all_accounts():
-    print("\U0001F4E6 Fetching ALL Airtable records (no status filter)...")
-    response = requests.get(AIRTABLE_URL, headers=headers)
+    print("📦 Fetching all Instagram accounts from Airtable...")
+    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{ACCOUNTS_TABLE}"
+    response = requests.get(url, headers=AIRTABLE_HEADERS)
     response.raise_for_status()
     return response.json().get("records", [])
 
-def extract_sheet_id(sheet_url):
-    try:
-        return sheet_url.split("/d/")[1].split("/")[0]
-    except (IndexError, AttributeError):
-        return None
-
-def get_followers(username):
-    followers = []
-    next_max_id = None
+def get_follower_count(username):
+    print(f"🔍 Fetching follower count for @{username}...")
     headers = {
         "Authorization": f"Token {ROCKETAPI_TOKEN}",
         "Content-Type": "application/json"
     }
-    print(f"\n🔄 Processing @{username} (IG)...")
+    response = requests.post(ROCKETAPI_INFO_URL, headers=headers, json={"username": username})
+    response.raise_for_status()
+    data = response.json().get("data", {})
+    return data.get("follower_count", 0)
 
-    while True:
-        payload = {"username": username}
-        if next_max_id:
-            payload["next_max_id"] = next_max_id
+def update_airtable_account(record_id, follower_count):
+    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{ACCOUNTS_TABLE}/{record_id}"
+    payload = {
+        "fields": {
+            "Latest Followers": follower_count,
+            "Last Checked": datetime.utcnow().isoformat()
+        }
+    }
+    requests.patch(url, headers=AIRTABLE_HEADERS, json=payload)
+
+def log_statistics_entry(username, follower_count):
+    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{STATS_TABLE}"
+    payload = {
+        "fields": {
+            "Username": [username],
+            "Follower Count": follower_count,
+            "Timestamp": datetime.utcnow().isoformat()
+        }
+    }
+    requests.post(url, headers=AIRTABLE_HEADERS, json=payload)
+
+def sync_instagram_posts(username):
+    print(f"🖼 Fetching posts for @{username}...")
+    headers = {
+        "Authorization": f"Token {ROCKETAPI_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    response = requests.post(ROCKETAPI_POSTS_URL, headers=headers, json={"username": username})
+    if response.status_code != 200:
+        print(f"❌ Failed to fetch posts for @{username}: {response.text}")
+        return
+
+    posts = response.json().get("data", {}).get("items", [])
+    airtable_url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{POSTS_TABLE}"
+
+    for post in posts:
+        image_url = post.get("image_versions2", {}).get("candidates", [{}])[0].get("url", "")
+        caption = post.get("caption", {}).get("text", "")
+        timestamp = post.get("taken_at")
+        post_date = datetime.utcfromtimestamp(timestamp).isoformat() if timestamp else None
+        post_link = f"https://www.instagram.com/p/{post.get('code', '')}"
+
+        payload = {
+            "fields": {
+                "Username": [username],
+                "Image": [{"url": image_url}],
+                "Caption": caption,
+                "Post Date": post_date,
+                "Post Link": post_link
+            }
+        }
 
         try:
-            response = requests.post(ROCKETAPI_URL, headers=headers, json=payload)
-            if response.status_code != 200:
-                print(f"❌ Failed to fetch from RocketAPI ({response.status_code}): {response.text}")
-                break
-            data = response.json()
-            print(f"🧪 DEBUG [{username}] RocketAPI raw response:\n***\n  {json.dumps(data.get('data', {}), indent=2)}\n***")
-
-            users = data.get("data", {}).get("users", [])
-            followers.extend([user.get("username") for user in users if user.get("username")])
-
-            next_max_id = data.get("data", {}).get("next_max_id")
-            if not next_max_id:
-                break
-
+            requests.post(airtable_url, headers=AIRTABLE_HEADERS, json=payload)
         except Exception as e:
-            print(f"❌ Error fetching followers for @{username}: {e}")
-            break
+            print(f"❌ Error uploading post for @{username}: {e}")
 
-    print(f"📊 Pulled {len(followers)} followers from @{username}")
-    return followers
-
-def update_google_sheet(sheet_id, followers, username):
-    try:
-        range_name = f"{username}!A:A"
-        result = sheets_service.spreadsheets().values().get(
-            spreadsheetId=sheet_id,
-            range=range_name
-        ).execute()
-        existing = result.get("values", [])
-        existing_usernames = {row[0] for row in existing if row}
-
-        new_followers = [[f] for f in followers if f not in existing_usernames]
-
-        if new_followers:
-            sheets_service.spreadsheets().values().append(
-                spreadsheetId=sheet_id,
-                range=f"{username}!A1",
-                valueInputOption="RAW",
-                insertDataOption="INSERT_ROWS",
-                body={"values": new_followers}
-            ).execute()
-            print(f"✅ Synced {len(new_followers)} new followers from @{username} → Sheet tab: {username}")
-        else:
-            print(f"✅ No new followers to sync from @{username} → Sheet tab: {username}")
-
-    except Exception as e:
-        print(f"❌ Failed to update Google Sheet tab {username} in {sheet_id}: {e}")
+    print(f"✅ Synced {len(posts)} posts for @{username}")
 
 # --- MAIN ---
 def main():
-    records = get_all_accounts()
-    print(f"\n🔍 Found {len(records)} total records in Airtable.")
+    try:
+        records = get_all_accounts()
+    except Exception as e:
+        print(f"❌ Failed to fetch Airtable records: {e}")
+        return
+
+    print(f"🔢 Found {len(records)} accounts in Airtable.\n")
 
     for record in records:
         fields = record.get("fields", {})
         username = fields.get("Username")
-        sheet_url = fields.get("Google Sheets")
+        record_id = record.get("id")
 
         if not username:
             print("⚠️ Skipping: no Username provided.")
             continue
-        if not sheet_url:
-            print(f"⚠️ Skipping @{username}: no Google Sheets URL.")
-            continue
 
-        sheet_id = extract_sheet_id(sheet_url)
-        if not sheet_id:
-            print(f"⚠️ Skipping @{username}: invalid sheet URL.")
-            continue
+        try:
+            follower_count = get_follower_count(username)
+            update_airtable_account(record_id, follower_count)
+            log_statistics_entry(username, follower_count)
+            sync_instagram_posts(username)
+            print(f"✅ Finished syncing for @{username}\n")
 
-        followers = get_followers(username)
-        if not followers:
-            print(f"⚠️ Skipping @{username}: no followers returned.")
-            continue
+        except Exception as e:
+            print(f"❌ Error processing @{username}: {e}\n")
 
-        update_google_sheet(sheet_id, followers, username)
-
-    print("\n✅ Follower sync completed.")
+    print("🏁 All accounts synced successfully.")
 
 if __name__ == "__main__":
     main()
+
