@@ -122,7 +122,7 @@ def sync_instagram_posts(username):
         for post in posts:
             shortcode = post.get("code") or post.get("shortcode")
             post_link = f"https://www.instagram.com/p/{shortcode}" if shortcode else None
-            if not post_link or airtable_record_exists(post_link):
+            if not post_link:
                 continue
 
             caption = post.get("caption", {}).get("text", "")
@@ -131,11 +131,22 @@ def sync_instagram_posts(username):
             image_url = post.get("image_versions2", {}).get("candidates", [{}])[0].get("url", "")
             like_count = post.get("like_count", 0)
             comment_count = post.get("comment_count", 0)
-            view_count = post.get("view_count", 0) if "video_versions" in post else None
+
+            # ✅ FIX: Better view count logic
+            is_video = post.get("media_type") == 2
+            view_count = post.get("view_count") if is_video else None
+
+            # ✅ Check if post already exists
+            existing_url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{POSTS_TABLE}"
+            params = {
+                "filterByFormula": f"{{Post Link}} = '{post_link}'"
+            }
+            existing_response = requests.get(existing_url, headers=AIRTABLE_HEADERS, params=params)
+            existing_records = existing_response.json().get("records", [])
 
             airtable_payload = {
                 "fields": {
-                    "Username": username,  # ✅ Plain text field
+                    "Username": username,
                     "Image": [{"url": image_url}],
                     "Caption": caption,
                     "Post Date": post_date,
@@ -147,17 +158,25 @@ def sync_instagram_posts(username):
             }
 
             try:
-                requests.post(airtable_url, headers=AIRTABLE_HEADERS, json=airtable_payload)
-                total_posts_synced += 1
-                print(f"✅ Synced: {post_link}")
+                if existing_records:
+                    # Update existing record
+                    record_id = existing_records[0]["id"]
+                    update_url = f"{existing_url}/{record_id}"
+                    requests.patch(update_url, headers=AIRTABLE_HEADERS, json=airtable_payload)
+                    print(f"🔁 Updated: {post_link}")
+                else:
+                    # Create new record
+                    requests.post(existing_url, headers=AIRTABLE_HEADERS, json=airtable_payload)
+                    print(f"✅ Synced: {post_link}")
+                    total_posts_synced += 1
             except Exception as e:
-                print(f"❌ Failed to upload to Airtable: {e}")
+                print(f"❌ Failed to sync Airtable post: {e}")
 
         end_cursor = body.get("next_max_id")
         if not end_cursor:
             break
 
-    print(f"🎯 Total posts synced for @{username}: {total_posts_synced}\n")
+    print(f"🎯 Total new posts synced for @{username}: {total_posts_synced}\n")
 
 # --- MAIN ---
 def main():
