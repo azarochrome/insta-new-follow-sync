@@ -35,17 +35,11 @@ def get_follower_count(username):
         "Authorization": f"Token {ROCKETAPI_TOKEN}",
         "Content-Type": "application/json"
     }
-
     response = requests.post(ROCKETAPI_INFO_URL, headers=headers, json={"username": username})
     response.raise_for_status()
-
     try:
         data = response.json()
-        follower_count = data.get("response", {}).get("body", {}).get("data", {}).get("user", {}).get("edge_followed_by", {}).get("count")
-        if follower_count is None:
-            print(f"⚠️ follower_count not found for @{username}")
-            return 0
-        return follower_count
+        return data.get("response", {}).get("body", {}).get("data", {}).get("user", {}).get("edge_followed_by", {}).get("count", 0)
     except Exception as e:
         print(f"❌ Error parsing follower count for @{username}: {e}")
         return 0
@@ -70,8 +64,16 @@ def log_statistics_entry(username, follower_count):
             "Timestamp": datetime.utcnow().isoformat()
         }
     }
-    response = requests.post(url, headers=AIRTABLE_HEADERS, json=payload)
+    requests.post(url, headers=AIRTABLE_HEADERS, json=payload)
     print(f"📝 Logged follower count for @{username}")
+
+def airtable_record_exists(post_link):
+    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{POSTS_TABLE}"
+    params = {
+        "filterByFormula": f"{{Post Link}} = '{post_link}'"
+    }
+    response = requests.get(url, headers=AIRTABLE_HEADERS, params=params)
+    return len(response.json().get("records", [])) > 0
 
 def sync_instagram_posts(username):
     print(f"🖼 Fetching posts for @{username}...")
@@ -80,42 +82,67 @@ def sync_instagram_posts(username):
         "Content-Type": "application/json"
     }
 
-    payload = {
-        "username": username,
-        "count": 12
-    }
-
-    response = requests.post(ROCKETAPI_MEDIA_URL, headers=headers, json=payload)
-    if response.status_code != 200:
-        print(f"❌ Failed to fetch posts for @{username}: {response.text}")
-        return
-
-    posts = response.json().get("data", {}).get("items", [])
+    end_cursor = None
+    total_posts_synced = 0
     airtable_url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{POSTS_TABLE}"
 
-    for post in posts:
-        image_url = post.get("image_versions2", {}).get("candidates", [{}])[0].get("url", "")
-        caption = post.get("caption", {}).get("text", "")
-        timestamp = post.get("taken_at")
-        post_date = datetime.utcfromtimestamp(timestamp).isoformat() if timestamp else None
-        post_link = f"https://www.instagram.com/p/{post.get('code', '')}"
-
+    while True:
         payload = {
-            "fields": {
-                "Username": [username],
-                "Image": [{"url": image_url}],
-                "Caption": caption,
-                "Post Date": post_date,
-                "Post Link": post_link
-            }
+            "username": username,
+            "count": 12,
         }
+        if end_cursor:
+            payload["max_id"] = end_cursor
 
-        try:
-            requests.post(airtable_url, headers=AIRTABLE_HEADERS, json=payload)
-        except Exception as e:
-            print(f"❌ Error uploading post for @{username}: {e}")
+        response = requests.post(ROCKETAPI_MEDIA_URL, headers=headers, json=payload)
+        if response.status_code != 200:
+            print(f"❌ Failed to fetch posts for @{username}: {response.text}")
+            break
 
-    print(f"✅ Synced {len(posts)} posts for @{username}")
+        data = response.json().get("data", {})
+        posts = data.get("items", [])
+        end_cursor = data.get("next_max_id")
+
+        if not posts:
+            break
+
+        for post in posts:
+            post_id = post.get("id")
+            image_url = post.get("image_versions2", {}).get("candidates", [{}])[0].get("url", "")
+            caption = post.get("caption", {}).get("text", "")
+            timestamp = post.get("taken_at")
+            post_date = datetime.utcfromtimestamp(timestamp).isoformat() if timestamp else None
+            post_link = f"https://www.instagram.com/p/{post.get('code', '')}"
+            like_count = post.get("like_count", 0)
+            comment_count = post.get("comment_count", 0)
+            view_count = post.get("view_count", 0) if "video_versions" in post else None
+
+            if airtable_record_exists(post_link):
+                continue
+
+            payload = {
+                "fields": {
+                    "Username": [username],
+                    "Image": [{"url": image_url}],
+                    "Caption": caption,
+                    "Post Date": post_date,
+                    "Post Link": post_link,
+                    "Likes": like_count,
+                    "Comments": comment_count,
+                    "Views": view_count,
+                }
+            }
+
+            try:
+                requests.post(airtable_url, headers=AIRTABLE_HEADERS, json=payload)
+                total_posts_synced += 1
+            except Exception as e:
+                print(f"❌ Error uploading post for @{username}: {e}")
+
+        if not end_cursor:
+            break
+
+    print(f"✅ Synced {total_posts_synced} posts for @{username}")
 
 # --- MAIN ---
 def main():
