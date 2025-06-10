@@ -13,8 +13,8 @@ ACCOUNTS_TABLE = "Instagram Statistics"
 STATS_TABLE = "Instagram FC"
 POSTS_TABLE = "Instagram Posts"
 
-ROCKETAPI_INFO_URL = "https://v1.rocketapi.io/instagram/user/get_info"
-ROCKETAPI_POSTS_URL = "https://v1.rocketapi.io/instagram/user/posts"
+ROCKETAPI_PROFILE_URL = "https://v1.rocketapi.io/instagram/user/get_web_profile_info"
+ROCKETAPI_MEDIA_URL = "https://v1.rocketapi.io/instagram/user/get_user_media_by_username"
 
 AIRTABLE_HEADERS = {
     "Authorization": f"Bearer {AIRTABLE_API_KEY}",
@@ -35,10 +35,14 @@ def get_follower_count(username):
         "Authorization": f"Token {ROCKETAPI_TOKEN}",
         "Content-Type": "application/json"
     }
-    response = requests.post(ROCKETAPI_INFO_URL, headers=headers, json={"username": username})
+    response = requests.post(ROCKETAPI_PROFILE_URL, headers=headers, json={"username": username})
     response.raise_for_status()
     data = response.json().get("data", {})
-    return data.get("follower_count", 0)
+    follower_count = data.get("follower_count")
+    if follower_count is None:
+        print(f"⚠️ No follower count found for @{username}")
+        return 0
+    return follower_count
 
 def update_airtable_account(record_id, follower_count):
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{ACCOUNTS_TABLE}/{record_id}"
@@ -48,7 +52,8 @@ def update_airtable_account(record_id, follower_count):
             "Last Checked": datetime.utcnow().isoformat()
         }
     }
-    requests.patch(url, headers=AIRTABLE_HEADERS, json=payload)
+    response = requests.patch(url, headers=AIRTABLE_HEADERS, json=payload)
+    print(f"✅ Airtable updated for record {record_id} with {follower_count} followers")
 
 def log_statistics_entry(username, follower_count):
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{STATS_TABLE}"
@@ -59,7 +64,8 @@ def log_statistics_entry(username, follower_count):
             "Timestamp": datetime.utcnow().isoformat()
         }
     }
-    requests.post(url, headers=AIRTABLE_HEADERS, json=payload)
+    response = requests.post(url, headers=AIRTABLE_HEADERS, json=payload)
+    print(f"📝 Logged follower count for @{username} in Airtable FC table")
 
 def sync_instagram_posts(username):
     print(f"🖼 Fetching posts for @{username}...")
@@ -67,7 +73,7 @@ def sync_instagram_posts(username):
         "Authorization": f"Token {ROCKETAPI_TOKEN}",
         "Content-Type": "application/json"
     }
-    response = requests.post(ROCKETAPI_POSTS_URL, headers=headers, json={"username": username})
+    response = requests.post(ROCKETAPI_MEDIA_URL, headers=headers, json={"username": username})
     if response.status_code != 200:
         print(f"❌ Failed to fetch posts for @{username}: {response.text}")
         return
@@ -132,4 +138,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
