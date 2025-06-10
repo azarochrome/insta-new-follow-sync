@@ -8,7 +8,7 @@ AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY")
 ROCKETAPI_TOKEN = os.environ.get("ROCKETAPI_TOKEN")
 
 # --- ENDPOINTS ---
-AIRTABLE_BASE_ID = "appTxTTXPTBFwjelH"
+AIRTABLE_BASE_ID = "appoLMfEjRaZGXMh4"
 ACCOUNTS_TABLE = "Instagram Statistics"
 STATS_TABLE = "Instagram FC"
 POSTS_TABLE = "Instagram Posts"
