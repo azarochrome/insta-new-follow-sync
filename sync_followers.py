@@ -76,7 +76,8 @@ def airtable_record_exists(post_link):
     return len(response.json().get("records", [])) > 0
 
 def sync_instagram_posts(username):
-    print(f"🖼 Fetching posts for @{username}...")
+    print(f"\n🖼 Fetching posts for @{username}...")
+
     headers = {
         "Authorization": f"Token {ROCKETAPI_TOKEN}",
         "Content-Type": "application/json"
@@ -89,38 +90,67 @@ def sync_instagram_posts(username):
     while True:
         payload = {
             "username": username,
-            "count": 12,
+            "count": 12
         }
         if end_cursor:
             payload["max_id"] = end_cursor
 
+        print("📤 Requesting media with payload:", json.dumps(payload))
         response = requests.post(ROCKETAPI_MEDIA_URL, headers=headers, json=payload)
-        if response.status_code != 200:
-            print(f"❌ Failed to fetch posts for @{username}: {response.text}")
-            break
 
-        data = response.json().get("data", {})
-        posts = data.get("items", [])
-        end_cursor = data.get("next_max_id")
+        try:
+            res_data = response.json()
+            print("📥 RocketAPI Response:")
+            print(json.dumps(res_data, indent=2)[:1500])  # Truncated to avoid overload
+        except Exception as e:
+            print(f"❌ Failed to parse JSON for @{username}: {e}")
+            print(response.text)
+            return
+
+        # Try multiple common schemas
+        posts = []
+
+        # RocketAPI V1 - Standard schema
+        if "data" in res_data and "items" in res_data["data"]:
+            posts = res_data["data"]["items"]
+
+        # RocketAPI "response.body.data.user.edge_owner_to_timeline_media.edges" schema
+        elif "response" in res_data:
+            posts = (
+                res_data.get("response", {})
+                .get("body", {})
+                .get("data", {})
+                .get("user", {})
+                .get("edge_owner_to_timeline_media", {})
+                .get("edges", [])
+            )
+            posts = [edge.get("node", {}) for edge in posts]
 
         if not posts:
+            print(f"⚠️ No posts found for @{username} in this batch.\n")
             break
 
         for post in posts:
             post_id = post.get("id")
             image_url = post.get("image_versions2", {}).get("candidates", [{}])[0].get("url", "")
             caption = post.get("caption", {}).get("text", "")
-            timestamp = post.get("taken_at")
+            timestamp = post.get("taken_at") or post.get("taken_at_timestamp")
             post_date = datetime.utcfromtimestamp(timestamp).isoformat() if timestamp else None
-            post_link = f"https://www.instagram.com/p/{post.get('code', '')}"
-            like_count = post.get("like_count", 0)
-            comment_count = post.get("comment_count", 0)
+            shortcode = post.get("code") or post.get("shortcode")
+            post_link = f"https://www.instagram.com/p/{shortcode}" if shortcode else None
+            like_count = post.get("like_count") or post.get("edge_liked_by", {}).get("count", 0)
+            comment_count = post.get("comment_count") or post.get("edge_media_to_comment", {}).get("count", 0)
             view_count = post.get("view_count", 0) if "video_versions" in post else None
 
-            if airtable_record_exists(post_link):
+            if not post_link:
+                print(f"⚠️ Skipping post with no link or shortcode")
                 continue
 
-            payload = {
+            if airtable_record_exists(post_link):
+                print(f"🔁 Post already exists in Airtable: {post_link}")
+                continue
+
+            airtable_payload = {
                 "fields": {
                     "Username": [username],
                     "Image": [{"url": image_url}],
@@ -134,16 +164,18 @@ def sync_instagram_posts(username):
             }
 
             try:
-                requests.post(airtable_url, headers=AIRTABLE_HEADERS, json=payload)
+                requests.post(airtable_url, headers=AIRTABLE_HEADERS, json=airtable_payload)
                 total_posts_synced += 1
+                print(f"✅ Synced: {post_link}")
             except Exception as e:
-                print(f"❌ Error uploading post for @{username}: {e}")
+                print(f"❌ Error uploading post to Airtable: {e}")
 
+        # Check for next page
+        end_cursor = res_data.get("data", {}).get("next_max_id")
         if not end_cursor:
             break
 
-    print(f"✅ Synced {total_posts_synced} posts for @{username}")
-
+    print(f"🎯 Total posts synced for @{username}: {total_posts_synced}\n")
 # --- MAIN ---
 def main():
     try:
