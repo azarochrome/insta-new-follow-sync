@@ -13,7 +13,7 @@ ACCOUNTS_TABLE = "Instagram Statistics"
 STATS_TABLE = "Instagram FC"
 POSTS_TABLE = "Instagram Posts"
 
-ROCKETAPI_PROFILE_URL = "https://v1.rocketapi.io/instagram/user/get_web_profile_info"
+ROCKETAPI_INFO_URL = "https://v1.rocketapi.io/instagram/user/get_info"
 ROCKETAPI_MEDIA_URL = "https://v1.rocketapi.io/instagram/user/get_user_media_by_username"
 
 AIRTABLE_HEADERS = {
@@ -35,10 +35,12 @@ def get_follower_count(username):
         "Authorization": f"Token {ROCKETAPI_TOKEN}",
         "Content-Type": "application/json"
     }
-    response = requests.post(ROCKETAPI_PROFILE_URL, headers=headers, json={"username": username})
+    response = requests.post(ROCKETAPI_INFO_URL, headers=headers, json={"username": username})
     response.raise_for_status()
     data = response.json().get("data", {})
-    follower_count = data.get("follower_count")
+    user = data.get("user", {})
+    follower_count = user.get("edge_followed_by", {}).get("count")
+
     if follower_count is None:
         print(f"⚠️ No follower count found for @{username}")
         return 0
@@ -53,7 +55,7 @@ def update_airtable_account(record_id, follower_count):
         }
     }
     response = requests.patch(url, headers=AIRTABLE_HEADERS, json=payload)
-    print(f"✅ Airtable updated for record {record_id} with {follower_count} followers")
+    print(f"✅ Airtable updated with {follower_count} followers")
 
 def log_statistics_entry(username, follower_count):
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{STATS_TABLE}"
@@ -65,7 +67,7 @@ def log_statistics_entry(username, follower_count):
         }
     }
     response = requests.post(url, headers=AIRTABLE_HEADERS, json=payload)
-    print(f"📝 Logged follower count for @{username} in Airtable FC table")
+    print(f"📝 Logged follower count for @{username}")
 
 def sync_instagram_posts(username):
     print(f"🖼 Fetching posts for @{username}...")
