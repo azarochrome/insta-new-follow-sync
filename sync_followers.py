@@ -89,7 +89,7 @@ def sync_instagram_posts(username):
 
     while True:
         payload = {
-            "username": username,
+            "username": username.strip(),
             "count": 12
         }
         if end_cursor:
@@ -100,22 +100,21 @@ def sync_instagram_posts(username):
 
         try:
             raw = response.json()
-            raw_body = raw.get("response", {}).get("body")
+            body = raw.get("response", {}).get("body")
 
-            # Fix: body is a JSON string, not dict
-            if isinstance(raw_body, str):
-                body = json.loads(raw_body)
-            else:
-                print(f"⚠️ Unexpected format for @{username}, skipping.")
-                return
+            # 💡 FIX: body is already a dict, not string
+            if isinstance(body, str):
+                body = json.loads(body)
 
-            if body.get("status") == "fail" or "items" not in body:
+            # 🚫 Skip unauthorized users
+            if not body or body.get("status") == "fail" or "items" not in body:
                 print(f"🚫 Not authorized or no posts for @{username}: {body.get('message', 'No items')}")
                 return
 
-            posts = body.get("items", [])
+            posts = body["items"]
+
         except Exception as e:
-            print(f"❌ Failed to parse RocketAPI post data for @{username}: {e}")
+            print(f"❌ Failed to parse RocketAPI response for @{username}: {e}")
             print(response.text)
             return
 
@@ -124,10 +123,8 @@ def sync_instagram_posts(username):
             break
 
         for post in posts:
-            post_id = post.get("id")
             shortcode = post.get("code") or post.get("shortcode")
             post_link = f"https://www.instagram.com/p/{shortcode}" if shortcode else None
-
             if not post_link or airtable_record_exists(post_link):
                 continue
 
